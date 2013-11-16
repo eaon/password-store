@@ -9,6 +9,7 @@ PREFIX="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
 ID="$PREFIX/.gpg-id"
 GIT_DIR="${PASSWORD_STORE_GIT:-$PREFIX}/.git"
 GPG_OPTS="--quiet --yes --batch"
+SYMPASS_ENC="$PREFIX/.fnsympass.gpg"
 
 export GIT_DIR
 export GIT_WORK_TREE="${PASSWORD_STORE_GIT:-$PREFIX}"
@@ -119,6 +120,19 @@ tmpdir() {
 	fi
 
 }
+get_sympass() {
+	SYMPASS=$(gpg2 -d $GPG_OPTS $SYMPASS_ENC)
+}
+encrypt_name() {
+	exec 3<<<$SYMPASS
+	NAME=$(gpg2 $GPG_OPTS --symmetric --passphrase-fd 3 --force-mdc <<<"$1" | base64 -w0 | sed -e s,/,-,g)
+	REPLEX="s,$1,$NAME"
+}
+decrypt_name() {
+	exec 3<<<$SYMPASS
+	NAME=$(sed -e s,-,/,g <<<"$1" | base64 -d | gpg2 $GPG_OPTS -d --passphrase-fd 3)
+	REPLEX="s,$1,$NAME,"
+}
 GETOPT="getopt"
 
 # source /path/to/platform-defined-functions
@@ -189,6 +203,10 @@ else
 	ID="$(head -n 1 "$ID")"
 fi
 
+if [ -f $SYMPASS_ENC ]; then
+	get_sympass
+fi
+
 case "$command" in
 	show|ls|list)
 		clip=0
@@ -222,7 +240,17 @@ case "$command" in
 			else
 				echo "${path%\/}"
 			fi
-			tree -l --noreport "$PREFIX/$path" | tail -n +2 | sed 's/\.gpg$//'
+			# decrypting encrypted names
+			TREE=$(tree -l --noreport "$PREFIX/$path" | tail -n +2 | sed 's/\.gpg$//')
+			for line in $TREE; do
+				MATCH=""
+				MATCH=$(grep -o -P "jA0E[-+_=a-zA-Z0-9]*"<<<$line)
+				if [ "$MATCH" != "" ]; then
+					decrypt_name $MATCH
+					TREE=$(sed -e $REPLEX<<<"$TREE")
+				fi
+			done
+			cat <<<"$TREE"
 		else
 			echo "$path is not in the password store."
 			exit 1
