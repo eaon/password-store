@@ -125,13 +125,33 @@ get_sympass() {
 }
 encrypt_name() {
 	exec 3<<<$SYMPASS
-	NAME=$(gpg2 $GPG_OPTS --symmetric --passphrase-fd 3 --force-mdc <<<"$1" | base64 -w0 | sed -e s,/,-,g)
-	REPLEX="s,$1,$NAME"
+	name=$(gpg2 $GPG_OPTS --symmetric --passphrase-fd 3 --force-mdc <<<"$1" | base64 -w0 | sed -e s,/,-,g)
+    if [ ! "$2" ]; then
+		echo "$name"
+	else
+		echo "s,$1,$name,"
+	fi
 }
 decrypt_name() {
 	exec 3<<<$SYMPASS
-	NAME=$(sed -e s,-,/,g <<<"$1" | base64 -d | gpg2 $GPG_OPTS -d --passphrase-fd 3)
-	REPLEX="s,$1,$NAME,"
+	name=$(sed -e s,-,/,g <<<"$1" | base64 -d | gpg2 $GPG_OPTS -d --passphrase-fd 3)
+    if [ ! "$2" ]; then
+		echo "$name"
+	else
+		echo "s,$1,$name,"
+	fi
+}
+from_map() {
+    while read entry; do
+		delim=$(expr index "$entry" ‽)
+		if grep -q "jA0E[-+_=a-zA-Z0-9]*"<<<"$1" && [ "${entry:0:$delim-1}" == "$1" ]; then
+			echo "${entry:$delim}"
+			break
+		elif [ "${entry:$delim}" == "$1" ]; then
+			echo "${entry:0:$delim-1}"
+			# we can have multiple matches for encrypted names
+		fi
+    done <<<"$namemap"
 }
 GETOPT="getopt"
 
@@ -205,6 +225,19 @@ fi
 
 if [ -f $SYMPASS_ENC ]; then
 	get_sympass
+
+	case "$command" in
+		show|insert|generate|edit|delete|rm|remove)
+			names=$(find "$PREFIX/" -regex ".*jA0E[-+_=a-zA-Z0-9]*.*" -printf "%f\\n" | sed -e s,\.gpg,,) 
+			namemap=""
+			while read name; do
+				if [ ! "$namemap" == "" ]; then
+					namemap="$namemap\\n"
+				fi
+			namemap="$namemap$name‽$(decrypt_name $name)"
+		done <<<"$names"
+		namemap=$(echo -e "$namemap")
+	esac
 fi
 
 case "$command" in
@@ -225,6 +258,7 @@ case "$command" in
 		fi
 
 		path="$1"
+		clearpath="$1"
 		passfile="$PREFIX/$path.gpg"
 		if [[ -f $passfile ]]; then
 			if [[ $clip -eq 0 ]]; then
@@ -241,16 +275,15 @@ case "$command" in
 				echo "${path%\/}"
 			fi
 			# decrypting encrypted names
-			TREE=$(tree -l --noreport "$PREFIX/$path" | tail -n +2 | sed 's/\.gpg$//')
-			for line in $TREE; do
-				MATCH=""
-				MATCH=$(grep -o -P "jA0E[-+_=a-zA-Z0-9]*"<<<$line)
-				if [ "$MATCH" != "" ]; then
-					decrypt_name $MATCH
-					TREE=$(sed -e $REPLEX<<<"$TREE")
+			tree=$(tree -l --noreport "$PREFIX/$path" | tail -n +2 | sed 's/\.gpg$//')
+			while read line; do
+				match=$(grep -o -P "jA0E[-+_=a-zA-Z0-9]*"<<<$line)
+				if [ "$match" != "" ]; then
+					replace=$(from_map $match)
+					tree=$(sed -e "s,$match,$replace,"<<<"$tree")
 				fi
-			done
-			cat <<<"$TREE"
+			done <<<"$tree"
+			cat <<<"$tree"
 		else
 			echo "$path is not in the password store."
 			exit 1
@@ -276,21 +309,30 @@ case "$command" in
 			exit 1
 		fi
 		path="$1"
+		clearpath="$1"
+		if [ -f $SYMPASS_ENC ]; then
+			path=""
+			while read line; do
+				line=$(encrypt_name $line)
+				path="$path/$line"
+		    done <<<"$(tr / \\n<<<$clearpath)"
+			path=$(cut -c 2-<<<$path)
+		fi
 		passfile="$PREFIX/$path.gpg"
 
-		[[ $force -eq 0 && -e $passfile ]] && yesno "An entry already exists for $path. Overwrite it?"
+		[[ $force -eq 0 && -e $passfile ]] && yesno "An entry already exists for $clearpath. Overwrite it?"
 
 		mkdir -p -v "$PREFIX/$(dirname "$path")"
 
 		if [[ $multiline -eq 1 ]]; then
-			echo "Enter contents of $path and press Ctrl+D when finished:"
+			echo "Enter contents of $clearpath and press Ctrl+D when finished:"
 			echo
 			gpg2 -e -r "$ID" -o "$passfile" $GPG_OPTS
 		elif [[ $noecho -eq 1 ]]; then
 			while true; do
-				read -r -p "Enter password for $path: " -s password
+				read -r -p "Enter password for $clearpath: " -s password
 				echo
-				read -r -p "Retype password for $path: " -s password_again
+				read -r -p "Retype password for $clearpath: " -s password_again
 				echo
 				if [[ $password == "$password_again" ]]; then
 					gpg2 -e -r "$ID" -o "$passfile" $GPG_OPTS <<<"$password"
@@ -300,10 +342,10 @@ case "$command" in
 				fi
 			done
 		else
-			read -r -p "Enter password for $path: " -e password
+			read -r -p "Enter password for $clearpath: " -e password
 			gpg2 -e -r "$ID" -o "$passfile" $GPG_OPTS <<<"$password"
 		fi
-		git_add_file "$passfile" "Added given password for $path to store."
+		git_add_file "$passfile" "Added given password for $clearpath to store."
 		;;
 	edit)
 		if [[ $# -ne 1 ]]; then
