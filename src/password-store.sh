@@ -124,8 +124,7 @@ get_sympass() {
 	SYMPASS=$(gpg2 -d $GPG_OPTS $SYMPASS_ENC)
 }
 encrypt_name() {
-	exec 3<<<$SYMPASS
-	name=$(gpg2 $GPG_OPTS --symmetric --passphrase-fd 3 --force-mdc <<<"$1" | base64 -w0 | sed -e s,/,-,g)
+	name=$(gpg2 $GPG_OPTS --symmetric --passphrase "$SYMPASS" --force-mdc <<<"$1" | base64 -w0 | sed -e s,/,-,g)
     if [ ! "$2" ]; then
 		echo "$name"
 	else
@@ -133,8 +132,7 @@ encrypt_name() {
 	fi
 }
 decrypt_name() {
-	exec 3<<<$SYMPASS
-	name=$(sed -e s,-,/,g <<<"$1" | base64 -d | gpg2 $GPG_OPTS -d --passphrase-fd 3)
+	name=$(sed -e s,-,/,g <<<"$1" | base64 -d | gpg2 $GPG_OPTS -d --passphrase "$SYMPASS")
     if [ ! "$2" ]; then
 		echo "$name"
 	else
@@ -397,7 +395,12 @@ case "$command" in
 			exit 1
 		fi
 
-		path="$1"
+		clearpath="$1"
+		if [ -f $SYMPASS_ENC ]; then
+			path=`encrypted_path "$clearpath"`
+		else
+			path="$clearpath"
+		fi
 		mkdir -p -v "$PREFIX/$(dirname "$path")"
 		passfile="$PREFIX/$path.gpg"
 		template="$program.XXXXXXXXXXXXX"
@@ -417,7 +420,7 @@ case "$command" in
 			echo "GPG encryption failed. Retrying."
 			sleep 1
 		done
-		git_add_file "$passfile" "$action password for $path using ${EDITOR:-vi}."
+		git_add_file "$passfile" "$action password for $clearpath using ${EDITOR:-vi}."
 		;;
 	generate)
 		clip=0
