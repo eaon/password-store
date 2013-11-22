@@ -153,12 +153,52 @@ from_map() {
 		fi
     done <<<"$namemap"
 }
+make_path() {
+	path=$(tr \\n /<<<"$(echo -e $1)")
+	echo ${path%/}
+}
+encrypted_path() {
+	# backwards compatibility
+	if [ -e "$PREFIX/$1.gpg" ] || [ -e "$PREFIX/$1" ]; then
+		echo "$1"
+		return
+	fi
+	# reuse encrypted paths that exist, create new ones for those that don't
+	while read clearpath; do
+		if [ ! "$path" == "" ]; then
+			path="$path\\n"
+		fi
+		mapped="$(from_map $clearpath)"
+		if [ "$mapped" == "" ]; then
+			path=$path$(encrypt_name "$clearpath")
+		elif [ ! "$mapped" == "" ] && [ $(wc -l<<<"$mapped") -eq 1 ]; then
+			newpath="$PREFIX/$(make_path $path$mapped)"
+			if [ -e "$newpath" ] || [ -e "$newpath.gpg"  ] ; then
+				path="$path$mapped"
+			else
+				path="$path$(encrypt_name $clearpath)"
+			fi
+		elif [ ! "$mapped" == "" ] && [ $(wc -l<<<"$mapped") -gt 1 ]; then
+			while read mapentry; do
+				newpath="$PREFIX/$(make_path $path$mapentry)"
+				if [ -e "$newpath" ] || [ -e "$newpath.gpg" ]; then
+					path="$path$mapentry"
+                    break
+				fi
+			done <<<"$mapped"
+			#echo not yet > /dev/stderr
+		fi
+	done <<<"$(tr / \\n<<<$1)"
+	#path=$(echo -e "$path")
+	echo "$(make_path $path)"
+}
 GETOPT="getopt"
 
 # source /path/to/platform-defined-functions
 #
 # END Platform definable
 #
+
 
 program="$(basename "$0")"
 command="$1"
@@ -257,7 +297,12 @@ case "$command" in
 			exit 1
 		fi
 
-		path="$1"
+		clearpath="$1"
+		if [ -f $SYMPASS_ENC ]; then
+			path=`encrypted_path "$clearpath"`
+		else
+			path="$clearpath"
+		fi
 		clearpath="$1"
 		passfile="$PREFIX/$path.gpg"
 		if [[ -f $passfile ]]; then
@@ -271,6 +316,8 @@ case "$command" in
 		elif [[ -d $PREFIX/$path ]]; then
 			if [[ -z $path ]]; then
 				echo "Password Store"
+			elif grep -q "jA0E[-+_=a-zA-Z0-9]*"<<<"${path%\/}"; then
+				from_map ${path%\/}
 			else
 				echo "${path%\/}"
 			fi
@@ -285,7 +332,7 @@ case "$command" in
 			done <<<"$tree"
 			cat <<<"$tree"
 		else
-			echo "$path is not in the password store."
+			echo "$clearpath is not in the password store."
 			exit 1
 		fi
 		;;
@@ -308,15 +355,11 @@ case "$command" in
 			echo "Usage: $program $command [--echo,-e | --multiline,-m] [--force,-f] pass-name"
 			exit 1
 		fi
-		path="$1"
 		clearpath="$1"
 		if [ -f $SYMPASS_ENC ]; then
-			path=""
-			while read line; do
-				line=$(encrypt_name $line)
-				path="$path/$line"
-		    done <<<"$(tr / \\n<<<$clearpath)"
-			path=$(cut -c 2-<<<$path)
+			path=`encrypted_path "$clearpath"`
+		else
+			path="$clearpath"
 		fi
 		passfile="$PREFIX/$path.gpg"
 
@@ -345,7 +388,8 @@ case "$command" in
 			read -r -p "Enter password for $clearpath: " -e password
 			gpg2 -e -r "$ID" -o "$passfile" $GPG_OPTS <<<"$password"
 		fi
-		git_add_file "$passfile" "Added given password for $clearpath to store."
+		# We shouldn't be leaking filenames via git either
+		git_add_file "$passfile" "Added given password for $path to store."
 		;;
 	edit)
 		if [[ $# -ne 1 ]]; then
@@ -394,7 +438,12 @@ case "$command" in
 			echo "Usage: $program $command [--no-symbols,-n] [--clip,-c] [--force,-f] pass-name pass-length"
 			exit 1
 		fi
-		path="$1"
+		clearpath="$1"
+		if [ -f $SYMPASS_ENC ]; then
+			path=`encrypted_path "$clearpath"`
+		else
+			path="$clearpath"
+		fi
 		length="$2"
 		if [[ ! $length =~ ^[0-9]+$ ]]; then
 			echo "pass-length \"$length\" must be a number."
@@ -403,7 +452,7 @@ case "$command" in
 		mkdir -p -v "$PREFIX/$(dirname "$path")"
 		passfile="$PREFIX/$path.gpg"
 
-		[[ $force -eq 0 && -e $passfile ]] && yesno "An entry already exists for $path. Overwrite it?"
+		[[ $force -eq 0 && -e $passfile ]] && yesno "An entry already exists for $clearpath. Overwrite it?"
 
 		pass="$(pwgen -s $symbols $length 1)"
 		[[ -n $pass ]] || exit 1
@@ -411,10 +460,10 @@ case "$command" in
 		git_add_file "$passfile" "Added generated password for $path to store."
 		
 		if [[ $clip -eq 0 ]]; then
-			echo "The generated password to $path is:"
+			echo "The generated password to $clearpath is:"
 			echo "$pass"
 		else
-			clip "$pass" "$path"
+			clip "$pass" "$clearpath"
 		fi
 		;;
 	delete|rm|remove)
@@ -433,7 +482,12 @@ case "$command" in
 			echo "Usage: $program $command [--recursive,-r] [--force,-f] pass-name"
 			exit 1
 		fi
-		path="$1"
+		clearpath="$1"
+		if [ -f $SYMPASS_ENC ]; then
+			path=`encrypted_path "$clearpath"`
+		else
+			path="$clearpath"
+		fi
 
 		passfile="$PREFIX/${path%/}"
 		if [[ ! -d $passfile ]]; then
