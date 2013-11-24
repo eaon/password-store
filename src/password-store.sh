@@ -120,9 +120,6 @@ tmpdir() {
 	fi
 
 }
-get_sympass() {
-	SYMPASS=$(gpg2 -d $GPG_OPTS $SYMPASS_ENC)
-}
 encrypt_name() {
 	name=$(gpg2 $GPG_OPTS --symmetric --passphrase "$SYMPASS" --force-mdc <<<"$1" | base64 -w0 | sed -e s,/,-,g)
     if [ ! "$2" ]; then
@@ -261,9 +258,12 @@ else
 	ID="$(head -n 1 "$ID")"
 fi
 
-if [ -f $SYMPASS_ENC ]; then
-	get_sympass
+if [ -f "$SYMPASS_ENC" ]; then
+	SYMPASS=$(gpg2 -d $GPG_OPTS $SYMPASS_ENC)
+	[ $? -ne 0 ] && echo -e "Couldn't decrypt filenames...\n"
+fi
 
+if [ ! "$SYMPASS" = "" ]; then
 	case "$command" in
 		show|insert|generate|edit|delete|rm|remove)
 			names=$(find "$PREFIX/" -regex ".*jA0E[-+_=a-zA-Z0-9]*.*" -printf "%f\\n" | sed -e s,\.gpg,,) 
@@ -296,8 +296,8 @@ case "$command" in
 		fi
 
 		clearpath="$1"
-		if [ -f $SYMPASS_ENC ]; then
-			path=`encrypted_path "$clearpath"`
+		if [ ! "$SYMPASS" = "" ]; then
+			path=$(encrypted_path "$clearpath")
 		else
 			path="$clearpath"
 		fi
@@ -321,13 +321,15 @@ case "$command" in
 			fi
 			# decrypting encrypted names
 			tree=$(tree -l --noreport "$PREFIX/$path" | tail -n +2 | sed 's/\.gpg$//')
-			while read line; do
-				match=$(grep -o -P "jA0E[-+_=a-zA-Z0-9]*"<<<$line)
-				if [ "$match" != "" ]; then
-					replace=$(from_map $match)
-					tree=$(sed -e "s,$match,$replace,"<<<"$tree")
-				fi
-			done <<<"$tree"
+			if [ ! "$SYMPASS" = "" ]; then
+				while read line; do
+					match=$(grep -o -P "jA0E[-+_=a-zA-Z0-9]*"<<<$line)
+					if [ "$match" != "" ]; then
+						replace=$(from_map $match)
+						tree=$(sed -e "s,$match,$replace,"<<<"$tree")
+					fi
+				done <<<"$tree"
+			fi
 			cat <<<"$tree"
 		else
 			echo "$clearpath is not in the password store."
@@ -354,8 +356,8 @@ case "$command" in
 			exit 1
 		fi
 		clearpath="$1"
-		if [ -f $SYMPASS_ENC ]; then
-			path=`encrypted_path "$clearpath"`
+		if [ ! "$SYMPASS" = "" ]; then
+			path=$(encrypted_path "$clearpath")
 		else
 			path="$clearpath"
 		fi
@@ -396,8 +398,8 @@ case "$command" in
 		fi
 
 		clearpath="$1"
-		if [ -f $SYMPASS_ENC ]; then
-			path=`encrypted_path "$clearpath"`
+		if [ ! "$SYMPASS" = "" ]; then
+			path=$(encrypted_path "$clearpath")
 		else
 			path="$clearpath"
 		fi
@@ -442,8 +444,8 @@ case "$command" in
 			exit 1
 		fi
 		clearpath="$1"
-		if [ -f $SYMPASS_ENC ]; then
-			path=`encrypted_path "$clearpath"`
+		if [ ! "$SYMPASS" = "" ]; then
+			path=$(encrypted_path "$clearpath")
 		else
 			path="$clearpath"
 		fi
@@ -486,8 +488,8 @@ case "$command" in
 			exit 1
 		fi
 		clearpath="$1"
-		if [ -f $SYMPASS_ENC ]; then
-			path=`encrypted_path "$clearpath"`
+		if [ ! "$SYMPASS" = "" ]; then
+			path=$(encrypted_path "$clearpath")
 		else
 			path="$clearpath"
 		fi
