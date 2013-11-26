@@ -422,7 +422,7 @@ case "$command" in
 			echo "GPG encryption failed. Retrying."
 			sleep 1
 		done
-		git_add_file "$passfile" "$action password for $clearpath using ${EDITOR:-vi}."
+		git_add_file "$passfile" "$action password for $path using ${EDITOR:-vi}."
 		;;
 	generate)
 		clip=0
