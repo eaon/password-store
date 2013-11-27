@@ -315,7 +315,11 @@ case "$command" in
 			if [[ -z $path ]]; then
 				echo "Password Store"
 			elif grep -q "jA0E[-+_=a-zA-Z0-9]*"<<<"${path%\/}"; then
-				from_map ${path%\/}
+				clearpath=""
+				while read pathpart; do
+					clearpath=$clearpath$(from_map "$pathpart")/
+				done <<<"$(tr / \\n <<<${path%\/})"
+				echo "${clearpath%\/}"
 			else
 				echo "${path%\/}"
 			fi
