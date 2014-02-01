@@ -30,7 +30,7 @@ usage() {
 	cat <<_EOF
 
 Usage:
-    $program init [--reencrypt,-e] gpg-id
+    $program init [--reencrypt,-e] gpg-id [gpg-id...]
         Initialize new password storage and use gpg-id for encryption.
         Optionally reencrypt existing passwords using new gpg-id.
     $program [ls] [subfolder]
@@ -146,20 +146,27 @@ case "$command" in
 			--) shift; break ;;
 		esac done
 
-		if [[ $# -ne 1 ]]; then
-			echo "Usage: $program $command [--reencrypt,-e] gpg-id"
+		if [[ $# -lt 1 ]]; then
+			echo "Usage: $program $command [--reencrypt,-e] gpg-id [gpg-id ...]"
 			exit 1
 		fi
 
-		gpg_id="$1"
+		gpg_id=("$@")
 		mkdir -v -p "$PREFIX"
-		echo "$gpg_id" > "$ID"
-		echo "Password store initialized for $gpg_id."
-		git_add_file "$ID" "Set GPG id to $gpg_id."
+		printf "%s\n" "${gpg_id[@]}" > "$ID"
+		echo "Password store initialized for:"
+		printf " %s\n" "${gpg_id[@]}"
+		printf -v readable_ids "%s, " "${gpg_id[@]}"
+		readable_ids=${readable_ids%, }
+		git_add_file "$ID" "Set GPG id(s) to $readable_ids."
 
 		if [[ $reencrypt -eq 1 ]]; then
+			gpg_r=()
+			for id in "${gpg_id[@]}"
+			do gpg_r+=(-r "$id")
+			done
 			find "$PREFIX/" -iname '*.gpg' | while read passfile; do
-				gpg2 -d $GPG_OPTS "$passfile" | gpg2 -e -r "$gpg_id" -o "$passfile.new" $GPG_OPTS &&
+				gpg2 -d $GPG_OPTS "$passfile" | gpg2 -e "${gpg_r[@]}" -o "$passfile.new" $GPG_OPTS &&
 				mv -v "$passfile.new" "$passfile"
 			done
 			git_add_file "$PREFIX" "Reencrypted entire store using new GPG id $gpg_id."
@@ -186,7 +193,16 @@ elif [[ ! -f $ID ]]; then
 	usage
 	exit 1
 else
-	ID="$(head -n 1 "$ID")"
+	ID_FILE=$ID
+	ID=()
+	while read -r id
+	do ID+=("$id")
+	done < "$ID_FILE"
+	unset ID_FILE id
+	gpg_r=()
+	for id in "${ID[@]}"
+	do gpg_r+=(-r "$id")
+	done
 fi
 
 case "$command" in
@@ -257,7 +273,7 @@ case "$command" in
 		if [[ $multiline -eq 1 ]]; then
 			echo "Enter contents of $path and press Ctrl+D when finished:"
 			echo
-			gpg2 -e -r "$ID" -o "$passfile" $GPG_OPTS
+			gpg2 -e "${gpg_r[@]}" -o "$passfile" $GPG_OPTS
 		elif [[ $noecho -eq 1 ]]; then
 			while true; do
 				read -r -p "Enter password for $path: " -s password
@@ -265,7 +281,7 @@ case "$command" in
 				read -r -p "Retype password for $path: " -s password_again
 				echo
 				if [[ $password == "$password_again" ]]; then
-					gpg2 -e -r "$ID" -o "$passfile" $GPG_OPTS <<<"$password"
+					gpg2 -e "${gpg_r[@]}" -o "$passfile" $GPG_OPTS <<<"$password"
 					break
 				else
 					echo "Error: the entered passwords do not match."
@@ -273,7 +289,7 @@ case "$command" in
 			done
 		else
 			read -r -p "Enter password for $path: " -e password
-			gpg2 -e -r "$ID" -o "$passfile" $GPG_OPTS <<<"$password"
+			gpg2 -e "${gpg_r[@]}" -o "$passfile" $GPG_OPTS <<<"$password"
 		fi
 		git_add_file "$passfile" "Added given password for $path to store."
 		;;
@@ -299,7 +315,7 @@ case "$command" in
 			action="Edited"
 		fi
 		${EDITOR:-vi} "$tmp_file"
-		while ! gpg2 -e -r "$ID" -o "$passfile" $GPG_OPTS "$tmp_file"; do
+		while ! gpg2 -e "${gpg_r[@]}" -o "$passfile" $GPG_OPTS "$tmp_file"; do
 			echo "GPG encryption failed. Retrying."
 			sleep 1
 		done
@@ -337,7 +353,7 @@ case "$command" in
 
 		pass="$(pwgen -s $symbols $length 1)"
 		[[ -n $pass ]] || exit 1
-		gpg2 -e -r "$ID" -o "$passfile" $GPG_OPTS <<<"$pass"
+		gpg2 -e "${gpg_r[@]}" -o "$passfile" $GPG_OPTS <<<"$pass"
 		git_add_file "$passfile" "Added generated password for $path to store."
 		
 		if [[ $clip -eq 0 ]]; then
