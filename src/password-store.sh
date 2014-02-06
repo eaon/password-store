@@ -106,7 +106,11 @@ clip() {
 
 		echo "$before" | base64 -d | xclip -selection clipboard
 	) & disown
-	echo "Copied $2 to clipboard. Will clear in 45 seconds."
+	MSG="Copied $2 to clipboard. Will clear in 45 seconds."
+	if [[ $PASSNOTIFY -eq 1 ]]; then
+		notify-send -i seahorse -t 1 -h int:transient:1 "pass" "$MSG"
+	fi
+	echo "$MSG"
 }
 tmpdir() {
 	if [[ -d /dev/shm && -w /dev/shm && -x /dev/shm ]]; then
@@ -122,7 +126,7 @@ tmpdir() {
 }
 encrypt_name() {
 	name=$(gpg2 $GPG_OPTS --symmetric --passphrase "$SYMPASS" --force-mdc <<<"$1" | base64 -w0 | sed -e s,/,-,g)
-    if [ ! "$2" ]; then
+	if [ ! "$2" ]; then
 		echo "$name"
 	else
 		echo "s,$1,$name,"
@@ -130,14 +134,14 @@ encrypt_name() {
 }
 decrypt_name() {
 	name=$(sed -e s,-,/,g <<<"$1" | base64 -d | gpg2 $GPG_OPTS -d --passphrase "$SYMPASS")
-    if [ ! "$2" ]; then
+	if [ ! "$2" ]; then
 		echo "$name"
 	else
 		echo "s,$1,$name,"
 	fi
 }
 from_map() {
-    while read entry; do
+	while read entry; do
 		delim=$(expr index "$entry" ‽)
 		if grep -q "jA0E[-+_=a-zA-Z0-9]*"<<<"$1" && [ "${entry:0:$delim-1}" == "$1" ]; then
 			echo "${entry:$delim}"
@@ -146,7 +150,7 @@ from_map() {
 			echo "${entry:0:$delim-1}"
 			# we can have multiple matches for encrypted names
 		fi
-    done <<<"$namemap"
+	done <<<"$namemap"
 }
 make_path() {
 	path=$(tr \\n /<<<"$(echo -e $1)")
@@ -178,7 +182,7 @@ encrypted_path() {
 				newpath="$PREFIX/$(make_path $path$mapentry)"
 				if [ -e "$newpath" ] || [ -e "$newpath.gpg" ]; then
 					path="$path$mapentry"
-                    break
+					break
 				fi
 			done <<<"$mapped"
 			#echo not yet > /dev/stderr
@@ -336,7 +340,11 @@ case "$command" in
 			fi
 			cat <<<"$tree"
 		else
-			echo "$clearpath is not in the password store."
+			MSG=$(echo "$clearpath is not in the password store.")
+			if [[ $PASSNOTIFY -eq 1 ]]; then
+				notify-send -i seahorse -t 1 -h int:transient:1 "pass" "$MSG"
+			fi
+			echo "$MSG"
 			exit 1
 		fi
 		;;
